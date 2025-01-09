@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -54,7 +55,26 @@ func (w *Writer) Write(data []byte) (int, error) {
 	default:
 		b := make([]byte, len(data))
 		copy(b, data)
+
+		lvlStr, err := jsonparser.GetUnsafeString(b, zerolog.LevelFieldName)
+		if err != nil {
+			return 0, fmt.Errorf("failed to retrieve level field name from data: %w", err)
+		}
+
+		lvl, err := zerolog.ParseLevel(lvlStr)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse level: %w", err)
+		}
+
+		if _, enabled := w.levels[lvl]; !enabled {
+			return len(data), nil
+		}
+
 		w.byteCh <- b
+
+		if lvl == zerolog.FatalLevel {
+			w.Close()
+		}
 	}
 
 	return len(data), nil
@@ -218,22 +238,6 @@ func (w *Writer) runBackgroundJob() {
 			}
 
 			counter++
-
-			lvlStr, err := jsonparser.GetUnsafeString(data, zerolog.LevelFieldName)
-			if err != nil {
-				logger.Printf("failed to retrieve level field name from data: %s\n", err)
-				continue
-			}
-
-			lvl, err := zerolog.ParseLevel(lvlStr)
-			if err != nil {
-				logger.Printf("failed to parse level: %s\n", err)
-				continue
-			}
-
-			if _, enabled := w.levels[lvl]; !enabled {
-				continue
-			}
 
 			data, _ = jsonparser.Set(data, loggerName, "logger")
 
